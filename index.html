@@ -83,15 +83,17 @@
         </div>
     </div>
 
-    <!-- 5. Gereksinim: Sağ altta footer eklendi -->
+    <!-- Footer -->
     <footer class="absolute bottom-4 right-4 text-xs text-gray-500">
         created by Serdar BAYAR
     </footer>
 
     <script>
-        // --- Sabitler ve Yardımcı Fonksiyonlar ---
+        // NOT: Bu sistem, bir Arka Yüz (Backend) katmanına ihtiyaç duyar
+        // (örneğin Node.js veya Python) ve bu katman MSSQL'e güvenli bir şekilde bağlanır.
+        // Aşağıdaki `db` objesi, MSSQL'i taklit eden yerel depolamadır (`localStorage`).
+        // Gerçek entegrasyon için bu fonksiyonlar `fetch` ile API'yi çağırmalıdır.
 
-        // Firestore yerine kullanılacak basit bellek içi (in-memory) veri tabanı
         const db = {
             users: [],
             complaints: [],
@@ -114,8 +116,9 @@
 
         const STORAGE_KEY = 'sys_db_data';
 
-        // Veri tabanını yükle/kaydet
-        function loadDB() {
+        // Veri tabanını yükle/kaydet - API'den veri çekmeyi taklit eder
+        async function loadDB() {
+            // Gerçekte: await fetch('/api/data')
             try {
                 const storedData = localStorage.getItem(STORAGE_KEY);
                 if (storedData) {
@@ -129,7 +132,8 @@
             }
         }
 
-        function saveDB() {
+        async function saveDB() {
+            // Gerçekte: await fetch('/api/save', { method: 'POST', body: JSON.stringify(db) })
             localStorage.setItem(STORAGE_KEY, JSON.stringify({
                 users: db.users,
                 complaints: db.complaints,
@@ -172,8 +176,15 @@
         // --- Auth Fonksiyonları (Gereksinim 1 & 4) ---
 
         async function registerUser(phone, password, apartment) {
+            // Gerçekte: await fetch('/api/register', { method: 'POST', body: { phone, password, apartment } })
             if (!phone || !password || !apartment) return { success: false, message: "Tüm alanları doldurmalısınız." };
+            
+            // 1. Kontrol: Telefon numarası benzersiz olmalı
             if (db.users.some(u => u.phone_no === phone)) return { success: false, message: "Bu telefon numarası zaten kayıtlı." };
+            
+            // 2. Kontrol: Daire numarası benzersiz olmalı (Kullanıcı isteği)
+            if (db.users.some(u => u.daire_no.toLowerCase() === apartment.toLowerCase())) return { success: false, message: `Bu daire numarası (${apartment}) zaten başka bir kullanıcıya aittir.` };
+
 
             // Şifre Hash Simülasyonu
             const password_hash = btoa(password); // Basit Base64 ile simülasyon
@@ -187,11 +198,12 @@
             };
 
             db.users.push(newUser);
-            saveDB();
+            await saveDB(); // Veriyi kaydetmeyi bekle
             return { success: true, message: "Kayıt başarılı. Şimdi giriş yapabilirsiniz." };
         }
 
         async function loginUser(phone, password) {
+            // Gerçekte: await fetch('/api/login', { method: 'POST', body: { phone, password } })
             const user = db.users.find(u => u.phone_no === phone);
 
             if (user && user.password_hash === btoa(password)) {
@@ -215,7 +227,8 @@
 
         // --- Şikayet Yönetimi Fonksiyonları (Gereksinim 3 & 5) ---
 
-        function createComplaint(title, description, categoryId, isAnonymous, file) {
+        async function createComplaint(title, description, categoryId, isAnonymous, file) {
+             // Gerçekte: await fetch('/api/complaints', { method: 'POST', body: complaintData })
             const newComplaint = {
                 id: generateId(),
                 kategori_id: parseInt(categoryId),
@@ -232,11 +245,12 @@
             };
 
             db.complaints.push(newComplaint);
-            saveDB();
+            await saveDB(); // Veriyi kaydetmeyi bekle
             return { success: true, message: isAnonymous ? "Anonim şikayetiniz başarıyla kaydedildi." : "Şikayetiniz başarıyla kaydedildi." };
         }
 
-        function addNoteToComplaint(complaintId, noteContent, isVisibleToSakin, userRole) {
+        async function addNoteToComplaint(complaintId, noteContent, isVisibleToSakin, userRole) {
+            // Gerçekte: await fetch('/api/notes', { method: 'POST', body: noteData })
             const complaint = db.complaints.find(c => c.id === complaintId);
             if (!complaint) return { success: false, message: "Şikayet bulunamadı." };
 
@@ -252,27 +266,28 @@
             };
 
             db.complaintNotes.push(newNote);
-            saveDB();
+            await saveDB(); // Veriyi kaydetmeyi bekle
 
             // Bildirim Simülasyonu: (Gereksinim: Bildirim Sistemi)
             if (complaint.kullanıcı_id && !complaint.is_anonymous) {
-                // Burada SendGrid/Twilio simülasyonu yapılır.
+                // Burada SendGrid/Twilio API çağrısı simülasyonu yapılır.
                 console.log(`Bildirim: Sakin ${complaint.daire_no} için yeni yönetici notu eklendi.`);
             }
 
             return { success: true, message: "Not başarıyla eklendi." };
         }
 
-        function updateComplaintStatus(complaintId, newStatus) {
+        async function updateComplaintStatus(complaintId, newStatus) {
+            // Gerçekte: await fetch('/api/complaints/' + complaintId + '/status', { method: 'PUT', body: { status: newStatus } })
             const complaint = db.complaints.find(c => c.id === complaintId);
             if (!complaint) return { success: false, message: "Şikayet bulunamadı." };
 
             complaint.durum = newStatus;
-            saveDB();
+            await saveDB(); // Veriyi kaydetmeyi bekle
 
             // Bildirim Simülasyonu: (Gereksinim: Bildirim Sistemi)
             if (complaint.kullanıcı_id && !complaint.is_anonymous) {
-                // Burada SendGrid/Twilio simülasyonu yapılır.
+                // Burada SendGrid/Twilio API çağrısı simülasyonu yapılır.
                 console.log(`Bildirim: Şikayet #${complaint.id} durumu ${STATUS_MAP[newStatus]} olarak güncellendi.`);
             }
 
@@ -290,7 +305,7 @@
             modalFilenameEl.textContent = `Dosya Adı: ${filename}`;
 
             // Gerçek görsel yerine placeholder URL'sini güncelleyebiliriz
-            // Örneğin: Dosya adına göre farklı placeholderlar gösterebiliriz, ama şu an sabit kalsın.
+            // NOT: Gerçek bir sistemde, bu, sunucudan güvenli bir şekilde alınmış görselin URL'si olmalıdır.
             modalImageEl.src = `https://placehold.co/400x300/e0e7ff/3f3f46?text=${encodeURIComponent(filename)}`;
 
 
@@ -425,6 +440,7 @@
 
         // --- Sakin Paneli (User Dashboard) ---
         function renderUserDashboard() {
+            // Gerçekte: Veri API'den çekilir
             const userComplaints = db.complaints
                 .filter(c => c.kullanıcı_id === loggedInUser.id && !c.is_anonymous) // Sadece kendi anonim olmayan şikayetlerini görür
                 .sort((a, b) => new Date(b.oluşturma_tarihi) - new Date(a.oluşturma_tarihi));
@@ -504,6 +520,7 @@
 
         // --- Yönetici Paneli (Admin Dashboard) ---
         function renderAdminDashboard() {
+            // Gerçekte: Veri API'den filtrelenerek çekilir
             const startDate = getDateRangeStart(adminFilters.dateRange);
 
             const allComplaints = db.complaints.sort((a, b) => new Date(b.oluşturma_tarihi) - new Date(a.oluşturma_tarihi));
@@ -609,7 +626,7 @@
                 </div>
             `;
         }
-        
+
         // Yönetici filtrelerini güncelleyen fonksiyon
         function updateAdminFilter(key, value) {
             adminFilters[key] = value;
@@ -618,6 +635,7 @@
 
         // --- Şikayet Detay Sayfası (Kullanıcı ve Yönetici Ortak) ---
         function renderComplaintDetail() {
+            // Gerçekte: Şikayet detayı API'den çekilir
             const complaintId = loggedInUser.viewingId;
             const complaint = db.complaints.find(c => c.id === complaintId);
             const isUser = loggedInUser.rol === 'sakin';
@@ -743,6 +761,12 @@
             `;
         }
 
+        // Yönetici filtrelerini güncelleyen fonksiyon
+        function updateAdminFilter(key, value) {
+            adminFilters[key] = value;
+            render();
+        }
+
         // --- Ana Render Fonksiyonu ---
         function render() {
             const appEl = document.getElementById('app');
@@ -795,7 +819,7 @@
             // Şikayet Oluşturma Formu (Senaryo 2)
             const createComplaintForm = document.getElementById('create-complaint-form');
             if (createComplaintForm) {
-                createComplaintForm.addEventListener('submit', (e) => {
+                createComplaintForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     const title = e.target.title.value;
                     const description = e.target.description.value;
@@ -803,7 +827,7 @@
                     const isAnonymous = e.target.isAnonymous.checked;
                     const file = e.target.file.files[0];
 
-                    const result = createComplaint(title, description, categoryId, isAnonymous, file);
+                    const result = await createComplaint(title, description, categoryId, isAnonymous, file);
                     renderMessage(result.message, result.success);
                     if (result.success) {
                         e.target.reset();
@@ -815,11 +839,11 @@
             // Yönetici: Durum Güncelleme Formu (Gereksinim 3)
             const updateStatusForm = document.getElementById('update-status-form');
             if (updateStatusForm) {
-                updateStatusForm.addEventListener('submit', (e) => {
+                updateStatusForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     const newStatus = e.target.status.value;
                     const complaintId = loggedInUser.viewingId;
-                    const result = updateComplaintStatus(complaintId, newStatus);
+                    const result = await updateComplaintStatus(complaintId, newStatus);
                     renderMessage(result.message, result.success);
                     if (result.success) {
                         render(); // Detay sayfasını yenile
@@ -830,13 +854,13 @@
             // Yönetici: Not Ekleme Formu (Senaryo 3)
             const addNoteForm = document.getElementById('add-note-form');
             if (addNoteForm) {
-                addNoteForm.addEventListener('submit', (e) => {
+                addNoteForm.addEventListener('submit', async (e) => {
                     e.preventDefault();
                     const content = e.target.content.value;
                     const isVisible = e.target.isVisible.checked;
                     const complaintId = loggedInUser.viewingId;
 
-                    const result = addNoteToComplaint(complaintId, content, isVisible, 'yönetici');
+                    const result = await addNoteToComplaint(complaintId, content, isVisible, 'yönetici');
                     renderMessage(result.message, result.success);
                     if (result.success) {
                         e.target.reset();
@@ -875,6 +899,14 @@
                     phone_no: 'sakin',
                     password_hash: btoa('sakin'), // 'sakin' için hash simülasyonu
                     daire_no: 'A1',
+                    rol: 'sakin'
+                });
+                 // İkinci bir sakin demo hesabı ekle (Benzersiz daire no kuralı test edilebilsin)
+                 db.users.push({
+                    id: 'sakin_id2',
+                    phone_no: 'sakin2',
+                    password_hash: btoa('sakin2'), 
+                    daire_no: 'B2',
                     rol: 'sakin'
                 });
                 // Demo şikayetler ekle
