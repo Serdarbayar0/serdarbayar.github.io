@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bina Şikayet Yönetim Sistemi (ŞYS)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .container-card {
+            max-width: 90%;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+        @media (min-width: 640px) {
+            .container-card {
+                max-width: 600px;
+                padding: 2rem;
+            }
+        }
+        .complaint-status-new { background-color: #fef3c7; color: #92400e; border-color: #fcd34d; }
+        .complaint-status-processing { background-color: #dbeafe; color: #1e40af; border-color: #60a5fa; }
+        .complaint-status-resolved { background-color: #d1fae5; color: #065f46; border-color: #34d399; }
+        .complaint-status-rejected { background-color: #fee2e2; color: #991b1b; border-color: #f87171; }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            border-width: 1px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-start justify-center pt-8 sm:pt-16">
+
+    <div id="app" class="container-card bg-white shadow-xl rounded-2xl">
+        <!-- Ana Görünüm burada yüklenecek -->
+    </div>
+
+    <script>
+        // --- Sabitler ve Yardımcı Fonksiyonlar ---
+
+        // Firestore yerine kullanılacak basit bellek içi (in-memory) veri tabanı
+        const db = {
+            users: [],
+            complaints: [],
+            categories: [
+                { id: 1, name: "Genel Temizlik" },
+                { id: 2, name: "Tesisat/Su Sorunu" },
+                { id: 3, name: "Elektrik Arızası" },
+                { id: 4, name: "Gürültü Şikayeti" },
+                { id: 5, name: "Aidat ve Muhasebe" },
+            ],
+            complaintNotes: []
+        };
+
+        const STATUS_MAP = {
+            'YENİ': 'Yeni',
+            'İŞLENİYOR': 'İşleniyor',
+            'ÇÖZÜLDÜ': 'Çözüldü',
+            'REDDEDİLDİ': 'Reddedildi'
+        };
+
+        const STORAGE_KEY = 'sys_db_data';
+
+        // Veri tabanını yükle/kaydet
+        function loadDB() {
+            try {
+                const storedData = localStorage.getItem(STORAGE_KEY);
+                if (storedData) {
+                    const parsedData = JSON.parse(storedData);
+                    db.users = parsedData.users || [];
+                    db.complaints = parsedData.complaints || [];
+                    db.complaintNotes = parsedData.complaintNotes || [];
+                }
+            } catch (e) {
+                console.error("Veri yüklenirken hata oluştu:", e);
+            }
+        }
+
+        function saveDB() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                users: db.users,
+                complaints: db.complaints,
+                complaintNotes: db.complaintNotes
+            }));
+        }
+
+        // Simülasyon: Kullanıcı rolü ve oturum durumu
+        let loggedInUser = null;
+        let currentView = 'login'; // 'login', 'register', 'userDashboard', 'adminDashboard', 'complaintDetail'
+
+        function setState(view, user = null) {
+            currentView = view;
+            if (user !== undefined) {
+                loggedInUser = user;
+            }
+            render();
+        }
+
+        function getStatusClass(status) {
+            switch (status) {
+                case 'YENİ': return 'complaint-status-new';
+                case 'İŞLENİYOR': return 'complaint-status-processing';
+                case 'ÇÖZÜLDÜ': return 'complaint-status-resolved';
+                case 'REDDEDİLDİ': return 'complaint-status-rejected';
+                default: return 'bg-gray-100 text-gray-800 border-gray-300';
+            }
+        }
+
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+        }
+
+        // --- Auth Fonksiyonları (Gereksinim 1 & 4) ---
+
+        async function registerUser(phone, password, apartment) {
+            if (!phone || !password || !apartment) return { success: false, message: "Tüm alanları doldurmalısınız." };
+            if (db.users.some(u => u.phone_no === phone)) return { success: false, message: "Bu telefon numarası zaten kayıtlı." };
+
+            // Şifre Hash Simülasyonu
+            const password_hash = btoa(password); // Basit Base64 ile simülasyon
+
+            const newUser = {
+                id: generateId(),
+                phone_no: phone,
+                password_hash: password_hash,
+                daire_no: apartment,
+                rol: 'sakin'
+            };
+
+            db.users.push(newUser);
+            saveDB();
+            return { success: true, message: "Kayıt başarılı. Şimdi giriş yapabilirsiniz." };
+        }
+
+        async function loginUser(phone, password) {
+            const user = db.users.find(u => u.phone_no === phone);
+
+            if (user && user.password_hash === btoa(password)) {
+                // Yönetici rolünü simüle etmek için demo hesap bilgisi (Gereksinim 4)
+                if (phone === 'admin' && password === 'admin') {
+                    user.rol = 'yönetici';
+                } else if (user.rol !== 'yönetici') {
+                    user.rol = 'sakin'; // Kayıt olanlar sakin
+                }
+
+                setState('userDashboard', user);
+                return { success: true, message: "Giriş başarılı." };
+            }
+
+            return { success: false, message: "Telefon numarası veya şifre hatalı." };
+        }
+
+        function logoutUser() {
+            setState('login', null);
+        }
+
+        // --- Şikayet Yönetimi Fonksiyonları (Gereksinim 3 & 5) ---
+
+        function createComplaint(title, description, categoryId, isAnonymous, file) {
+            const newComplaint = {
+                id: generateId(),
+                kategori_id: parseInt(categoryId),
+                başlık: title,
+                açıklama: description,
+                durum: 'YENİ',
+                is_anonymous: isAnonymous,
+                // Anonim ise kullanıcı_id NULL olabilir. (Senaryo 2)
+                kullanıcı_id: isAnonymous ? null : loggedInUser.id,
+                daire_no: isAnonymous ? null : loggedInUser.daire_no, // Yöneticinin anonim şikayeti daire no olmadan görmesi
+                oluşturma_tarihi: new Date().toISOString(),
+                // Dosya/Belge simülasyonu
+                dosya_adı: file ? file.name : null
+            };
+
+            db.complaints.push(newComplaint);
+            saveDB();
+            return { success: true, message: isAnonymous ? "Anonim şikayetiniz başarıyla kaydedildi." : "Şikayetiniz başarıyla kaydedildi." };
+        }
+
+        function addNoteToComplaint(complaintId, noteContent, isVisibleToSakin, userRole) {
+            const complaint = db.complaints.find(c => c.id === complaintId);
+            if (!complaint) return { success: false, message: "Şikayet bulunamadı." };
+
+            const newNote = {
+                id: generateId(),
+                şikayet_id: complaintId,
+                kullanıcı_id: loggedInUser.id,
+                not_içeriği: noteContent,
+                rol: userRole,
+                oluşturma_tarihi: new Date().toISOString(),
+                // Yöneticinin notunun görünürlüğünü belirler (Senaryo 3)
+                is_visible_to_sakin: isVisibleToSakin
+            };
+
+            db.complaintNotes.push(newNote);
+            saveDB();
+
+            // Bildirim Simülasyonu: (Gereksinim: Bildirim Sistemi)
+            if (complaint.kullanıcı_id && !complaint.is_anonymous) {
+                // Burada SendGrid/Twilio simülasyonu yapılır.
+                console.log(`Bildirim: Sakin ${complaint.daire_no} için yeni yönetici notu eklendi.`);
+            }
+
+            return { success: true, message: "Not başarıyla eklendi." };
+        }
+
+        function updateComplaintStatus(complaintId, newStatus) {
+            const complaint = db.complaints.find(c => c.id === complaintId);
+            if (!complaint) return { success: false, message: "Şikayet bulunamadı." };
+
+            complaint.durum = newStatus;
+            saveDB();
+
+            // Bildirim Simülasyonu: (Gereksinim: Bildirim Sistemi)
+            if (complaint.kullanıcı_id && !complaint.is_anonymous) {
+                // Burada SendGrid/Twilio simülasyonu yapılır.
+                console.log(`Bildirim: Şikayet #${complaint.id} durumu ${STATUS_MAP[newStatus]} olarak güncellendi.`);
+            }
+
+            return { success: true, message: `Durum başarıyla ${STATUS_MAP[newStatus]} olarak güncellendi.` };
+        }
+
+        // --- Bileşenler ve Render Fonksiyonu ---
+
+        function renderMessage(message, isSuccess = true) {
+            const messageEl = document.getElementById('message-area');
+            if (messageEl) {
+                messageEl.innerHTML = `<div class="p-3 mb-4 rounded-lg text-sm font-medium ${isSuccess ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                    ${message}
+                </div>`;
+                setTimeout(() => {
+                    messageEl.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // --- Anasayfa/Giriş Formu (Gereksinim 1 & 4) ---
+        function renderLogin() {
+            return `
+                <div class="space-y-6">
+                    <h1 class="text-3xl font-bold text-gray-800 text-center">Şikayet Yönetim Sistemi Girişi</h1>
+                    <div id="message-area"></div>
+
+                    <form id="login-form" class="space-y-4">
+                        <div>
+                            <label for="phone" class="block text-sm font-medium text-gray-700 mb-1">Telefon Numarası</label>
+                            <input type="text" id="phone" name="phone" required
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                                placeholder="5551234567">
+                        </div>
+                        <div>
+                            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Şifre</label>
+                            <input type="password" id="password" name="password" required
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                                placeholder="••••••••">
+                        </div>
+                        <button type="submit"
+                            class="w-full bg-blue-600 text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
+                            Giriş Yap
+                        </button>
+                    </form>
+
+                    <div class="flex justify-between items-center text-sm pt-2">
+                        <span class="text-gray-600">Hesabınız yok mu?</span>
+                        <button onclick="setState('register')" class="text-blue-600 font-medium hover:text-blue-700">
+                            Yeni Üyelik Oluştur (Basit Kayıt)
+                        </button>
+                    </div>
+
+                    <!-- Demo Bilgileri (Gereksinim 4 - Sadece yöneticinin demo bilgileri gösteriliyor) -->
+                    <div class="p-3 mt-4 border border-gray-200 rounded-lg bg-gray-50 text-sm">
+                        <p class="font-semibold text-gray-700 mb-1">Demo Yönetici Girişi:</p>
+                        <p class="text-gray-600">Kullanıcı Adı (Telefon No): <code class="font-mono bg-gray-200 p-1 rounded">admin</code></p>
+                        <p class="text-gray-600">Şifre: <code class="font-mono bg-gray-200 p-1 rounded">admin</code></p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Kayıt Formu (Senaryo 1) ---
+        function renderRegister() {
+            return `
+                <div class="space-y-6">
+                    <h1 class="text-3xl font-bold text-gray-800 text-center">Yeni Üyelik Oluştur</h1>
+                    <div id="message-area"></div>
+                    <p class="text-center text-sm text-gray-600">SMS doğrulama kaldırılmıştır. Kayıt hızlıdır.</p>
+
+                    <form id="register-form" class="space-y-4">
+                        <div>
+                            <label for="reg_phone" class="block text-sm font-medium text-gray-700 mb-1">Telefon Numarası</label>
+                            <input type="text" id="reg_phone" name="phone" required
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                                placeholder="5551234567">
+                        </div>
+                        <div>
+                            <label for="reg_apartment" class="block text-sm font-medium text-gray-700 mb-1">Daire Numarası (Örnek: A Blok Daire 12)</label>
+                            <input type="text" id="reg_apartment" name="apartment" required
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                                placeholder="A12">
+                        </div>
+                        <div>
+                            <label for="reg_password" class="block text-sm font-medium text-gray-700 mb-1">Şifre</label>
+                            <input type="password" id="reg_password" name="password" required
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                                placeholder="En az 6 karakter">
+                        </div>
+                        <button type="submit"
+                            class="w-full bg-green-600 text-white py-2.5 rounded-lg font-semibold hover:bg-green-700 transition duration-200 shadow-md">
+                            Hemen Kayıt Ol
+                        </button>
+                    </form>
+
+                    <div class="flex justify-center items-center text-sm pt-2">
+                        <button onclick="setState('login')" class="text-blue-600 font-medium hover:text-blue-700">
+                            Zaten hesabım var, Giriş Yap
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Sakin Paneli (User Dashboard) ---
+        function renderUserDashboard() {
+            const userComplaints = db.complaints
+                .filter(c => c.kullanıcı_id === loggedInUser.id && !c.is_anonymous) // Sadece kendi anonim olmayan şikayetlerini görür
+                .sort((a, b) => new Date(b.oluşturma_tarihi) - new Date(a.oluşturma_tarihi));
+
+            const complaintList = userComplaints.length > 0 ? userComplaints.map(c => `
+                <div onclick="setState('complaintDetail', { ...loggedInUser, viewingId: '${c.id}' })"
+                    class="p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition duration-200 cursor-pointer mb-3">
+                    <div class="flex justify-between items-start">
+                        <h3 class="text-lg font-semibold text-gray-800">${c.başlık}</h3>
+                        <span class="status-badge ${getStatusClass(c.durum)}">${STATUS_MAP[c.durum]}</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">Kategori: ${db.categories.find(cat => cat.id === c.kategori_id)?.name}</p>
+                    <p class="text-xs text-gray-400 mt-2">Oluşturma Tarihi: ${new Date(c.oluşturma_tarihi).toLocaleDateString()}</p>
+                </div>
+            `).join('') : '<p class="text-center py-8 text-gray-500">Henüz oluşturulmuş bir şikayetiniz yok.</p>';
+
+            return `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center border-b pb-4 mb-4">
+                        <h1 class="text-2xl font-bold text-gray-800">Merhaba, Daire ${loggedInUser.daire_no} Sakini</h1>
+                        <button onclick="logoutUser()" class="text-sm text-red-600 hover:text-red-800 font-medium">
+                            Çıkış Yap
+                        </button>
+                    </div>
+
+                    <div id="message-area"></div>
+
+                    <!-- Yeni Şikayet Oluşturma Bölümü (Gereksinim 3 & Senaryo 2) -->
+                    <div class="p-5 bg-blue-50 border border-blue-200 rounded-xl shadow-inner">
+                        <h2 class="text-xl font-semibold text-blue-700 mb-3">Yeni Şikayet Bildirimi</h2>
+                        <form id="create-complaint-form" class="space-y-3">
+                            <div>
+                                <label for="comp_category" class="block text-sm font-medium text-gray-700">Kategori</label>
+                                <select id="comp_category" name="category" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Seçiniz...</option>
+                                    ${db.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="comp_title" class="block text-sm font-medium text-gray-700">Başlık (Kısa Özet)</label>
+                                <input type="text" id="comp_title" name="title" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label for="comp_description" class="block text-sm font-medium text-gray-700">Detaylı Açıklama</label>
+                                <textarea id="comp_description" name="description" rows="3" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
+                            </div>
+                            <div>
+                                <label for="comp_file" class="block text-sm font-medium text-gray-700">Fotoğraf/Belge (Opsiyonel)</label>
+                                <input type="file" id="comp_file" name="file"
+                                    class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                            </div>
+                            <div class="flex items-center">
+                                <input id="comp_anonymous" name="isAnonymous" type="checkbox"
+                                    class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                                <label for="comp_anonymous" class="ml-2 block text-sm text-gray-700 font-medium">
+                                    Şikayetimi Anonim Olarak Bildir (Kimliğim görünmesin)
+                                </label>
+                            </div>
+                            <button type="submit"
+                                class="w-full bg-blue-600 text-white py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
+                                Şikayeti Kaydet
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Şikayet Takibi Bölümü (Gereksinim 3) -->
+                    <h2 class="text-xl font-bold text-gray-800 border-b pb-2 mt-6">Şikayetlerim (${userComplaints.length})</h2>
+                    <div class="space-y-4">
+                        ${complaintList}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Yönetici Paneli (Admin Dashboard) ---
+        function renderAdminDashboard() {
+            const allComplaints = db.complaints.sort((a, b) => new Date(b.oluşturma_tarihi) - new Date(a.oluşturma_tarihi));
+
+            // Filtreleme durumu
+            const currentFilters = {
+                status: document.getElementById('filter_status')?.value || 'TÜMÜ',
+                category: document.getElementById('filter_category')?.value || 'TÜMÜ',
+                anonymous: document.getElementById('filter_anonymous')?.value || 'TÜMÜ'
+            };
+
+            const filteredComplaints = allComplaints.filter(c => {
+                const statusMatch = currentFilters.status === 'TÜMÜ' || c.durum === currentFilters.status;
+                const categoryMatch = currentFilters.category === 'TÜMÜ' || c.kategori_id === parseInt(currentFilters.category);
+                let anonMatch = true;
+
+                if (currentFilters.anonymous === 'ANONİM') {
+                    anonMatch = c.is_anonymous === true;
+                } else if (currentFilters.anonymous === 'KİMLİKLİ') {
+                    anonMatch = c.is_anonymous === false;
+                }
+                return statusMatch && categoryMatch && anonMatch;
+            });
+
+            const complaintList = filteredComplaints.length > 0 ? filteredComplaints.map(c => {
+                const isAnon = c.is_anonymous;
+                const daireInfo = isAnon ? '<span class="text-sm font-semibold text-red-500">Anonim Şikayet</span>' :
+                    `<span class="text-sm font-medium text-gray-600">Daire: ${c.daire_no}</span>`;
+
+                return `
+                    <div onclick="setState('complaintDetail', { ...loggedInUser, viewingId: '${c.id}' })"
+                        class="p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition duration-200 cursor-pointer mb-3">
+                        <div class="flex justify-between items-start">
+                            <h3 class="text-lg font-semibold text-gray-800">${c.başlık}</h3>
+                            <span class="status-badge ${getStatusClass(c.durum)}">${STATUS_MAP[c.durum]}</span>
+                        </div>
+                        <div class="flex justify-between items-end mt-1">
+                            ${daireInfo}
+                            <p class="text-sm text-gray-500">Kategori: ${db.categories.find(cat => cat.id === c.kategori_id)?.name}</p>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-2">Oluşturma: ${new Date(c.oluşturma_tarihi).toLocaleDateString()}</p>
+                    </div>
+                `;
+            }).join('') : '<p class="text-center py-8 text-gray-500">Filtreleme kriterlerinize uygun şikayet bulunamadı.</p>';
+
+            return `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center border-b pb-4 mb-4">
+                        <h1 class="text-2xl font-bold text-gray-800">Yönetici Paneli (Tüm Şikayetler)</h1>
+                        <button onclick="logoutUser()" class="text-sm text-red-600 hover:text-red-800 font-medium">
+                            Çıkış Yap
+                        </button>
+                    </div>
+
+                    <div id="message-area"></div>
+
+                    <!-- Filtreleme Bölümü (Gereksinim: Yönetici Paneli) -->
+                    <div class="p-4 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
+                        <h2 class="text-lg font-semibold text-gray-700 mb-3">Şikayetleri Filtrele</h2>
+                        <div id="filter-form" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                                <label for="filter_status" class="block text-xs font-medium text-gray-600 mb-1">Durum</label>
+                                <select id="filter_status" name="status" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                                    onchange="render()">
+                                    <option value="TÜMÜ">Tümü</option>
+                                    ${Object.keys(STATUS_MAP).map(k => `<option value="${k}" ${currentFilters.status === k ? 'selected' : ''}>${STATUS_MAP[k]}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="filter_category" class="block text-xs font-medium text-gray-600 mb-1">Kategori</label>
+                                <select id="filter_category" name="category" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                                    onchange="render()">
+                                    <option value="TÜMÜ">Tümü</option>
+                                    ${db.categories.map(c => `<option value="${c.id}" ${currentFilters.category == c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="filter_anonymous" class="block text-xs font-medium text-gray-600 mb-1">Anonimlik</label>
+                                <select id="filter_anonymous" name="anonymous" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                                    onchange="render()">
+                                    <option value="TÜMÜ">Tümü</option>
+                                    <option value="ANONİM" ${currentFilters.anonymous === 'ANONİM' ? 'selected' : ''}>Anonim</option>
+                                    <option value="KİMLİKLİ" ${currentFilters.anonymous === 'KİMLİKLİ' ? 'selected' : ''}>Kimlikli</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Şikayet Listesi -->
+                    <h2 class="text-xl font-bold text-gray-800 border-b pb-2 mt-6">Toplam Şikayetler (${filteredComplaints.length})</h2>
+                    <div class="space-y-4">
+                        ${complaintList}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Şikayet Detay Sayfası (Kullanıcı ve Yönetici Ortak) ---
+        function renderComplaintDetail() {
+            const complaintId = loggedInUser.viewingId;
+            const complaint = db.complaints.find(c => c.id === complaintId);
+            const isUser = loggedInUser.rol === 'sakin';
+            const isManager = loggedInUser.rol === 'yönetici';
+
+            if (!complaint) return `<p class="text-center py-10">Şikayet Detayı Bulunamadı.</p>`;
+
+            // Sakinin sadece is_visible_to_sakin: TRUE olan notları görmesi (Senaryo 3)
+            const notes = db.complaintNotes
+                .filter(n => n.şikayet_id === complaintId)
+                .filter(n => isManager || n.is_visible_to_sakin === true)
+                .sort((a, b) => new Date(a.oluşturma_tarihi) - new Date(b.oluşturma_tarihi));
+
+            const categoryName = db.categories.find(cat => cat.id === complaint.kategori_id)?.name || 'Bilinmiyor';
+            const ownerInfo = complaint.is_anonymous ? 'Anonim Şikayet' : `Daire: ${complaint.daire_no}`;
+
+            const noteList = notes.length > 0 ? notes.map(n => {
+                const noteDate = new Date(n.oluşturma_tarihi).toLocaleString('tr-TR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                const visibilityTag = isManager ? (n.is_visible_to_sakin ? '<span class="ml-2 text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">Sakine Görünür</span>' : '<span class="ml-2 text-xs font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">İç Not (Sakine Gizli)</span>') : '';
+
+                return `
+                    <div class="p-3 mb-3 rounded-lg ${n.rol === 'yönetici' ? 'bg-blue-50 border-blue-200' : 'bg-gray-100 border-gray-200'} border">
+                        <div class="flex justify-between items-center text-xs text-gray-600 mb-1">
+                            <span class="font-semibold capitalize">${n.rol}:</span>
+                            <div class="flex items-center">
+                                ${visibilityTag}
+                                <span class="ml-2">${noteDate}</span>
+                            </div>
+                        </div>
+                        <p class="text-gray-800 whitespace-pre-wrap">${n.not_içeriği}</p>
+                    </div>
+                `;
+            }).join('') : '<p class="text-center text-sm py-4 text-gray-500">Henüz bir not/cevap bulunmamaktadır.</p>';
+
+            return `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center border-b pb-4 mb-4">
+                        <h1 class="text-2xl font-bold text-gray-800">${complaint.başlık}</h1>
+                        <button onclick="setState('${isUser ? 'userDashboard' : 'adminDashboard'}')" class="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                            Geri Dön
+                        </button>
+                    </div>
+
+                    <div id="message-area"></div>
+
+                    <!-- Şikayet Detay Kartı -->
+                    <div class="p-5 bg-white border border-gray-200 rounded-xl shadow-md space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-xl font-bold text-gray-700">${ownerInfo}</h2>
+                            <span class="status-badge text-base ${getStatusClass(complaint.durum)}">${STATUS_MAP[complaint.durum]}</span>
+                        </div>
+                        <p class="text-sm text-gray-500">Kategori: <span class="font-medium text-gray-700">${categoryName}</span></p>
+                        <p class="text-sm text-gray-500 border-t pt-3 mt-3">${complaint.açıklama}</p>
+                        ${complaint.dosya_adı ? `<p class="text-xs text-blue-600 pt-1">Ek Dosya: ${complaint.dosya_adı} (Simülasyon)</p>` : ''}
+                    </div>
+
+                    <!-- Yalnızca Yönetici Alanı -->
+                    ${isManager ? `
+                        <div class="p-5 bg-yellow-50 border border-yellow-200 rounded-xl shadow-inner space-y-4">
+                            <h2 class="text-xl font-semibold text-yellow-700">Yönetici İşlemleri</h2>
+                            <!-- Durum Güncelleme -->
+                            <form id="update-status-form" class="flex space-x-2">
+                                <select name="status" required class="flex-grow px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                    ${Object.keys(STATUS_MAP).map(k => `<option value="${k}" ${complaint.durum === k ? 'selected' : ''}>Durumu: ${STATUS_MAP[k]} Yap</option>`).join('')}
+                                </select>
+                                <button type="submit" class="bg-yellow-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-yellow-700 transition duration-200">
+                                    Durumu Kaydet
+                                </button>
+                            </form>
+                            <!-- Cevap/Not Ekleme (Senaryo 3) -->
+                            <form id="add-note-form" class="space-y-3 pt-4 border-t border-yellow-200">
+                                <div>
+                                    <label for="note_content" class="block text-sm font-medium text-gray-700 mb-1">Cevap/Not Ekle</label>
+                                    <textarea id="note_content" name="content" rows="3" required
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-yellow-500 focus:border-yellow-500"
+                                        placeholder="Şikayetle ilgili notunuzu yazınız..."></textarea>
+                                </div>
+                                <div class="flex items-center">
+                                    <input id="note_visible" name="isVisible" type="checkbox" checked
+                                        class="h-4 w-4 text-yellow-600 border-gray-300 rounded focus:ring-yellow-500">
+                                    <label for="note_visible" class="ml-2 block text-sm text-gray-700 font-medium">
+                                        Bu cevabı şikayet sahibine göster (Anonim değilse)
+                                    </label>
+                                </div>
+                                <button type="submit" class="w-full bg-yellow-600 text-white py-2.5 rounded-lg font-semibold hover:bg-yellow-700 transition duration-200 shadow-md">
+                                    Notu Ekle
+                                </button>
+                            </form>
+                        </div>
+                    ` : ''}
+
+                    <!-- Şikayet Notları/Cevaplar -->
+                    <h2 class="text-xl font-bold text-gray-800 border-b pb-2 mt-6">Şikayet Notları ve Cevaplar</h2>
+                    <div class="space-y-4">
+                        ${noteList}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Ana Render Fonksiyonu ---
+        function render() {
+            const appEl = document.getElementById('app');
+            let htmlContent = '';
+
+            // Hangi görünümün yükleneceğine karar verilir
+            if (!loggedInUser) {
+                htmlContent = currentView === 'register' ? renderRegister() : renderLogin();
+            } else if (loggedInUser.rol === 'yönetici') {
+                htmlContent = currentView === 'complaintDetail' ? renderComplaintDetail() : renderAdminDashboard();
+            } else { // Sakin
+                htmlContent = currentView === 'complaintDetail' ? renderComplaintDetail() : renderUserDashboard();
+            }
+
+            appEl.innerHTML = htmlContent;
+            attachEventListeners();
+        }
+
+        // --- Olay Dinleyicilerini Ekleme ---
+        function attachEventListeners() {
+            // Giriş Formu
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) {
+                loginForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const phone = e.target.phone.value;
+                    const password = e.target.password.value;
+                    const result = await loginUser(phone, password);
+                    renderMessage(result.message, result.success);
+                });
+            }
+
+            // Kayıt Formu (Senaryo 1)
+            const registerForm = document.getElementById('register-form');
+            if (registerForm) {
+                registerForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const phone = e.target.phone.value;
+                    const password = e.target.password.value;
+                    const apartment = e.target.apartment.value;
+                    const result = await registerUser(phone, password, apartment);
+                    renderMessage(result.message, result.success);
+                    if (result.success) {
+                        e.target.reset();
+                        setState('login'); // Başarılı kayıttan sonra giriş sayfasına yönlendir
+                    }
+                });
+            }
+
+            // Şikayet Oluşturma Formu (Senaryo 2)
+            const createComplaintForm = document.getElementById('create-complaint-form');
+            if (createComplaintForm) {
+                createComplaintForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const title = e.target.title.value;
+                    const description = e.target.description.value;
+                    const categoryId = e.target.category.value;
+                    const isAnonymous = e.target.isAnonymous.checked;
+                    const file = e.target.file.files[0];
+
+                    const result = createComplaint(title, description, categoryId, isAnonymous, file);
+                    renderMessage(result.message, result.success);
+                    if (result.success) {
+                        e.target.reset();
+                        render(); // Yeni şikayeti listede göstermek için paneli yenile
+                    }
+                });
+            }
+
+            // Yönetici: Durum Güncelleme Formu (Gereksinim 3)
+            const updateStatusForm = document.getElementById('update-status-form');
+            if (updateStatusForm) {
+                updateStatusForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const newStatus = e.target.status.value;
+                    const complaintId = loggedInUser.viewingId;
+                    const result = updateComplaintStatus(complaintId, newStatus);
+                    renderMessage(result.message, result.success);
+                    if (result.success) {
+                        render(); // Detay sayfasını yenile
+                    }
+                });
+            }
+
+            // Yönetici: Not Ekleme Formu (Senaryo 3)
+            const addNoteForm = document.getElementById('add-note-form');
+            if (addNoteForm) {
+                addNoteForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const content = e.target.content.value;
+                    const isVisible = e.target.isVisible.checked;
+                    const complaintId = loggedInUser.viewingId;
+
+                    const result = addNoteToComplaint(complaintId, content, isVisible, 'yönetici');
+                    renderMessage(result.message, result.success);
+                    if (result.success) {
+                        e.target.reset();
+                        render(); // Detay sayfasını yenile
+                    }
+                });
+            }
+
+            // Yönetici: Filtreleme Formu (Gereksinim 3) - onchange ile render() çağrılıyor, ekstra dinleyiciye gerek yok
+        }
+
+        // İlk yükleme
+        window.onload = () => {
+            loadDB();
+            // Eğer hiç kullanıcı yoksa, bir yönetici demo hesabı ekle
+            if (db.users.length === 0) {
+                db.users.push({
+                    id: 'admin_id',
+                    phone_no: 'admin',
+                    password_hash: btoa('admin'), // 'admin' için hash simülasyonu
+                    daire_no: 'Yönetim',
+                    rol: 'yönetici'
+                });
+                // Bir sakin demo hesabı ekle
+                 db.users.push({
+                    id: 'sakin_id',
+                    phone_no: 'sakin',
+                    password_hash: btoa('sakin'), // 'sakin' için hash simülasyonu
+                    daire_no: 'A1',
+                    rol: 'sakin'
+                });
+                // Demo şikayetler ekle
+                db.complaints.push(
+                    { id: 'c1', kategori_id: 2, başlık: 'Merdiven Boşluğu Lambası Yanmıyor', açıklama: '2. kat merdiven boşluğundaki lamba patlamış, değiştirilmesi gerekiyor.', durum: 'YENİ', is_anonymous: false, kullanıcı_id: 'sakin_id', daire_no: 'A1', oluşturma_tarihi: new Date(Date.now() - 86400000).toISOString(), dosya_adı: null },
+                    { id: 'c2', kategori_id: 4, başlık: 'Anonim Gürültü Şikayeti', açıklama: 'Gece 11’den sonra yüksek sesli müzik dinleniyor, rahatsızlık verici.', durum: 'İŞLENİYOR', is_anonymous: true, kullanıcı_id: null, daire_no: null, oluşturma_tarihi: new Date(Date.now() - 172800000).toISOString(), dosya_adı: null }
+                );
+                // Demo not ekle (Senaryo 3'ün Yönetici Cevabı adımı)
+                db.complaintNotes.push(
+                    { id: 'n1', şikayet_id: 'c2', kullanıcı_id: 'admin_id', not_içeriği: 'Konuyla ilgili bina sakinlerine genel duyuru yapılmıştır.', rol: 'yönetici', oluşturma_tarihi: new Date(Date.now() - 86400000).toISOString(), is_visible_to_sakin: true }
+                );
+                saveDB();
+            }
+            render();
+        };
+    </script>
+</body>
+</html>
