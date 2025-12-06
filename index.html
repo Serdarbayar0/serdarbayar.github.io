@@ -76,8 +76,8 @@
             </div>
             <div class="py-4 text-center">
                 <!-- Gerçek görsel yerine placeholder -->
-                <img src="https://placehold.co/400x300/e0e7ff/3f3f46?text=FOTO%C4%9FRAF+YOK" alt="Dosya Önizlemesi" class="max-w-full h-auto rounded-lg mx-auto shadow-lg border border-gray-200">
-                <p class="mt-4 text-sm text-gray-600">Bu bir demo placeholder görseldir.</p>
+                <img id="modal-image" src="https://placehold.co/400x300/e0e7ff/3f3f46?text=FOTO%C4%9FRAF+YOK" alt="Dosya Önizlemesi" class="max-w-full h-auto rounded-lg mx-auto shadow-lg border border-gray-200">
+                <p class="mt-4 text-sm text-gray-600">Bu bir demo placeholder görseldir. Gerçekte yüklenen fotoğraf/belge burada görünürdü.</p>
                 <p class="text-sm text-gray-500" id="modal-filename"></p>
             </div>
         </div>
@@ -284,9 +284,16 @@
             const modalEl = document.getElementById('image-modal');
             const modalTitleEl = document.getElementById('modal-title');
             const modalFilenameEl = document.getElementById('modal-filename');
+            const modalImageEl = document.getElementById('modal-image'); // Görsel elementini yakala
 
-            modalTitleEl.textContent = `Ekli Dosya: ${filename}`;
+            modalTitleEl.textContent = `Ekli Dosya Önizlemesi`;
             modalFilenameEl.textContent = `Dosya Adı: ${filename}`;
+
+            // Gerçek görsel yerine placeholder URL'sini güncelleyebiliriz
+            // Örneğin: Dosya adına göre farklı placeholderlar gösterebiliriz, ama şu an sabit kalsın.
+            modalImageEl.src = `https://placehold.co/400x300/e0e7ff/3f3f46?text=${encodeURIComponent(filename)}`;
+
+
             modalEl.style.display = 'flex';
         }
 
