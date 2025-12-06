@@ -23,6 +23,7 @@
                 padding: 2rem;
             }
         }
+        /* Durum Renkleri */
         .complaint-status-new { background-color: #fef3c7; color: #92400e; border-color: #fcd34d; }
         .complaint-status-processing { background-color: #dbeafe; color: #1e40af; border-color: #60a5fa; }
         .complaint-status-resolved { background-color: #d1fae5; color: #065f46; border-color: #34d399; }
@@ -35,6 +36,27 @@
             font-weight: 600;
             border-width: 1px;
         }
+        /* Modal Stilleri */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 50;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 0.75rem;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+            position: relative;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen flex items-start justify-center pt-8 sm:pt-16">
@@ -42,6 +64,29 @@
     <div id="app" class="container-card bg-white shadow-xl rounded-2xl">
         <!-- Ana Görünüm burada yüklenecek -->
     </div>
+
+    <!-- Fotoğraf Görüntüleme Modalı -->
+    <div id="image-modal" class="modal-overlay">
+        <div class="modal-content p-6">
+            <div class="flex justify-between items-center pb-3 border-b">
+                <h2 class="text-xl font-bold text-gray-800" id="modal-title">Ekli Dosya</h2>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="py-4 text-center">
+                <!-- Gerçek görsel yerine placeholder -->
+                <img src="https://placehold.co/400x300/e0e7ff/3f3f46?text=FOTO%C4%9FRAF+YOK" alt="Dosya Önizlemesi" class="max-w-full h-auto rounded-lg mx-auto shadow-lg border border-gray-200">
+                <p class="mt-4 text-sm text-gray-600">Bu bir demo placeholder görseldir.</p>
+                <p class="text-sm text-gray-500" id="modal-filename"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. Gereksinim: Sağ altta footer eklendi -->
+    <footer class="absolute bottom-4 right-4 text-xs text-gray-500">
+        created by Serdar BAYAR
+    </footer>
 
     <script>
         // --- Sabitler ve Yardımcı Fonksiyonlar ---
@@ -95,6 +140,12 @@
         // Simülasyon: Kullanıcı rolü ve oturum durumu
         let loggedInUser = null;
         let currentView = 'login'; // 'login', 'register', 'userDashboard', 'adminDashboard', 'complaintDetail'
+        let adminFilters = {
+            status: 'TÜMÜ',
+            category: 'TÜMÜ',
+            anonymous: 'TÜMÜ',
+            dateRange: 'TÜMÜ' // Yeni tarih filtresi
+        };
 
         function setState(view, user = null) {
             currentView = view;
@@ -228,6 +279,50 @@
             return { success: true, message: `Durum başarıyla ${STATUS_MAP[newStatus]} olarak güncellendi.` };
         }
 
+        // --- Modal Fonksiyonları ---
+        function openModal(filename) {
+            const modalEl = document.getElementById('image-modal');
+            const modalTitleEl = document.getElementById('modal-title');
+            const modalFilenameEl = document.getElementById('modal-filename');
+
+            modalTitleEl.textContent = `Ekli Dosya: ${filename}`;
+            modalFilenameEl.textContent = `Dosya Adı: ${filename}`;
+            modalEl.style.display = 'flex';
+        }
+
+        function closeModal() {
+            const modalEl = document.getElementById('image-modal');
+            modalEl.style.display = 'none';
+        }
+
+        // --- Filtreleme Yardımcıları ---
+        function getDateRangeStart(range) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            let startDate = null;
+
+            switch (range) {
+                case 'GÜNLÜK':
+                    startDate = today;
+                    break;
+                case 'HAFTALIK':
+                    // Haftanın başlangıcı Pazar (0) veya Pazartesi (1) olabilir. Burada Basitçe 7 gün öncesini alıyoruz.
+                    startDate = new Date(today);
+                    startDate.setDate(today.getDate() - 7);
+                    break;
+                case 'AYLIK':
+                    startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+                    break;
+                case 'YILLIK':
+                    startDate = new Date(today.getFullYear(), 0, 1);
+                    break;
+                case 'TÜMÜ':
+                default:
+                    return null; // Filtre yok
+            }
+            return startDate;
+        }
+
         // --- Bileşenler ve Render Fonksiyonu ---
 
         function renderMessage(message, isSuccess = true) {
@@ -246,7 +341,8 @@
         function renderLogin() {
             return `
                 <div class="space-y-6">
-                    <h1 class="text-3xl font-bold text-gray-800 text-center">Şikayet Yönetim Sistemi Girişi</h1>
+                    <!-- Başlık Güncel -->
+                    <h1 class="text-3xl font-bold text-gray-800 text-center">Ybs Apartmanı Şikayet Yönetim Sistemi</h1>
                     <div id="message-area"></div>
 
                     <form id="login-form" class="space-y-4">
@@ -273,13 +369,6 @@
                         <button onclick="setState('register')" class="text-blue-600 font-medium hover:text-blue-700">
                             Yeni Üyelik Oluştur (Basit Kayıt)
                         </button>
-                    </div>
-
-                    <!-- Demo Bilgileri (Gereksinim 4 - Sadece yöneticinin demo bilgileri gösteriliyor) -->
-                    <div class="p-3 mt-4 border border-gray-200 rounded-lg bg-gray-50 text-sm">
-                        <p class="font-semibold text-gray-700 mb-1">Demo Yönetici Girişi:</p>
-                        <p class="text-gray-600">Kullanıcı Adı (Telefon No): <code class="font-mono bg-gray-200 p-1 rounded">admin</code></p>
-                        <p class="text-gray-600">Şifre: <code class="font-mono bg-gray-200 p-1 rounded">admin</code></p>
                     </div>
                 </div>
             `;
@@ -408,26 +497,25 @@
 
         // --- Yönetici Paneli (Admin Dashboard) ---
         function renderAdminDashboard() {
+            const startDate = getDateRangeStart(adminFilters.dateRange);
+
             const allComplaints = db.complaints.sort((a, b) => new Date(b.oluşturma_tarihi) - new Date(a.oluşturma_tarihi));
 
-            // Filtreleme durumu
-            const currentFilters = {
-                status: document.getElementById('filter_status')?.value || 'TÜMÜ',
-                category: document.getElementById('filter_category')?.value || 'TÜMÜ',
-                anonymous: document.getElementById('filter_anonymous')?.value || 'TÜMÜ'
-            };
-
+            // Filtreleme mantığı
             const filteredComplaints = allComplaints.filter(c => {
-                const statusMatch = currentFilters.status === 'TÜMÜ' || c.durum === currentFilters.status;
-                const categoryMatch = currentFilters.category === 'TÜMÜ' || c.kategori_id === parseInt(currentFilters.category);
+                const statusMatch = adminFilters.status === 'TÜMÜ' || c.durum === adminFilters.status;
+                const categoryMatch = adminFilters.category === 'TÜMÜ' || c.kategori_id === parseInt(adminFilters.category);
                 let anonMatch = true;
+                if (adminFilters.anonymous === 'ANONİM') { anonMatch = c.is_anonymous === true; }
+                else if (adminFilters.anonymous === 'KİMLİKLİ') { anonMatch = c.is_anonymous === false; }
 
-                if (currentFilters.anonymous === 'ANONİM') {
-                    anonMatch = c.is_anonymous === true;
-                } else if (currentFilters.anonymous === 'KİMLİKLİ') {
-                    anonMatch = c.is_anonymous === false;
+                let dateMatch = true;
+                if (startDate) {
+                    const complaintDate = new Date(c.oluşturma_tarihi);
+                    dateMatch = complaintDate >= startDate;
                 }
-                return statusMatch && categoryMatch && anonMatch;
+
+                return statusMatch && categoryMatch && anonMatch && dateMatch;
             });
 
             const complaintList = filteredComplaints.length > 0 ? filteredComplaints.map(c => {
@@ -462,33 +550,45 @@
 
                     <div id="message-area"></div>
 
-                    <!-- Filtreleme Bölümü (Gereksinim: Yönetici Paneli) -->
+                    <!-- Filtreleme Bölümü (Durum, Kategori, Anonimlik ve YENİ: Tarih Aralığı) -->
                     <div class="p-4 bg-gray-100 rounded-xl shadow-inner border border-gray-200">
                         <h2 class="text-lg font-semibold text-gray-700 mb-3">Şikayetleri Filtrele</h2>
-                        <div id="filter-form" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div id="filter-form" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                             <div>
                                 <label for="filter_status" class="block text-xs font-medium text-gray-600 mb-1">Durum</label>
                                 <select id="filter_status" name="status" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                                    onchange="render()">
+                                    onchange="updateAdminFilter('status', this.value)">
                                     <option value="TÜMÜ">Tümü</option>
-                                    ${Object.keys(STATUS_MAP).map(k => `<option value="${k}" ${currentFilters.status === k ? 'selected' : ''}>${STATUS_MAP[k]}</option>`).join('')}
+                                    ${Object.keys(STATUS_MAP).map(k => `<option value="${k}" ${adminFilters.status === k ? 'selected' : ''}>${STATUS_MAP[k]}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label for="filter_category" class="block text-xs font-medium text-gray-600 mb-1">Kategori</label>
                                 <select id="filter_category" name="category" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                                    onchange="render()">
+                                    onchange="updateAdminFilter('category', this.value)">
                                     <option value="TÜMÜ">Tümü</option>
-                                    ${db.categories.map(c => `<option value="${c.id}" ${currentFilters.category == c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                                    ${db.categories.map(c => `<option value="${c.id}" ${adminFilters.category == c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label for="filter_anonymous" class="block text-xs font-medium text-gray-600 mb-1">Anonimlik</label>
                                 <select id="filter_anonymous" name="anonymous" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                                    onchange="render()">
+                                    onchange="updateAdminFilter('anonymous', this.value)">
                                     <option value="TÜMÜ">Tümü</option>
-                                    <option value="ANONİM" ${currentFilters.anonymous === 'ANONİM' ? 'selected' : ''}>Anonim</option>
-                                    <option value="KİMLİKLİ" ${currentFilters.anonymous === 'KİMLİKLİ' ? 'selected' : ''}>Kimlikli</option>
+                                    <option value="ANONİM" ${adminFilters.anonymous === 'ANONİM' ? 'selected' : ''}>Anonim</option>
+                                    <option value="KİMLİKLİ" ${adminFilters.anonymous === 'KİMLİKLİ' ? 'selected' : ''}>Kimlikli</option>
+                                </select>
+                            </div>
+                            <!-- YENİ: Tarih Aralığı Filtresi -->
+                            <div>
+                                <label for="filter_date_range" class="block text-xs font-medium text-gray-600 mb-1">Tarih Aralığı</label>
+                                <select id="filter_date_range" name="dateRange" class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                                    onchange="updateAdminFilter('dateRange', this.value)">
+                                    <option value="TÜMÜ" ${adminFilters.dateRange === 'TÜMÜ' ? 'selected' : ''}>Tümü</option>
+                                    <option value="GÜNLÜK" ${adminFilters.dateRange === 'GÜNLÜK' ? 'selected' : ''}>Günlük</option>
+                                    <option value="HAFTALIK" ${adminFilters.dateRange === 'HAFTALIK' ? 'selected' : ''}>Haftalık</option>
+                                    <option value="AYLIK" ${adminFilters.dateRange === 'AYLIK' ? 'selected' : ''}>Aylık</option>
+                                    <option value="YILLIK" ${adminFilters.dateRange === 'YILLIK' ? 'selected' : ''}>Yıllık</option>
                                 </select>
                             </div>
                         </div>
@@ -501,6 +601,12 @@
                     </div>
                 </div>
             `;
+        }
+        
+        // Yönetici filtrelerini güncelleyen fonksiyon
+        function updateAdminFilter(key, value) {
+            adminFilters[key] = value;
+            render();
         }
 
         // --- Şikayet Detay Sayfası (Kullanıcı ve Yönetici Ortak) ---
@@ -539,6 +645,29 @@
                 `;
             }).join('') : '<p class="text-center text-sm py-4 text-gray-500">Henüz bir not/cevap bulunmamaktadır.</p>';
 
+            // Fotoğraf/Belge Görüntüleme Desteği (Yalnızca yönetici görür)
+            let fileDisplay = '';
+            if (complaint.dosya_adı) {
+                // Yönetici ise tıklanabilir buton göster
+                if (isManager) {
+                     fileDisplay = `
+                        <button onclick="openModal('${complaint.dosya_adı}')"
+                            class="flex items-center text-xs text-blue-600 pt-1 mt-1 p-2 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition duration-150 w-full justify-center">
+                            <!-- Küçük Fotoğraf/Belge İkonu -->
+                            <svg class="w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                            <span class="font-medium">Ek Belgeyi Görüntüle:</span> ${complaint.dosya_adı}
+                        </button>`;
+                } else {
+                    // Sakin ise sadece dosya adını göster
+                    fileDisplay = `
+                        <div class="flex items-center text-xs text-gray-600 pt-1 mt-1 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                            <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                            <span class="font-medium">Ek Belge:</span> ${complaint.dosya_adı}
+                        </div>`;
+                }
+            }
+
+
             return `
                 <div class="space-y-6">
                     <div class="flex justify-between items-center border-b pb-4 mb-4">
@@ -559,7 +688,8 @@
                         </div>
                         <p class="text-sm text-gray-500">Kategori: <span class="font-medium text-gray-700">${categoryName}</span></p>
                         <p class="text-sm text-gray-500 border-t pt-3 mt-3">${complaint.açıklama}</p>
-                        ${complaint.dosya_adı ? `<p class="text-xs text-blue-600 pt-1">Ek Dosya: ${complaint.dosya_adı} (Simülasyon)</p>` : ''}
+
+                        ${fileDisplay}
                     </div>
 
                     <!-- Yalnızca Yönetici Alanı -->
@@ -708,7 +838,16 @@
                 });
             }
 
-            // Yönetici: Filtreleme Formu (Gereksinim 3) - onchange ile render() çağrılıyor, ekstra dinleyiciye gerek yok
+            // Modal kapatma olay dinleyicisi
+            const imageModal = document.getElementById('image-modal');
+            if (imageModal) {
+                imageModal.addEventListener('click', (e) => {
+                    // Overlay'e tıklanırsa kapat
+                    if (e.target.id === 'image-modal') {
+                        closeModal();
+                    }
+                });
+            }
         }
 
         // İlk yükleme
@@ -732,9 +871,17 @@
                     rol: 'sakin'
                 });
                 // Demo şikayetler ekle
+                const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+                const oneWeekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+                const oneMonthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+
                 db.complaints.push(
-                    { id: 'c1', kategori_id: 2, başlık: 'Merdiven Boşluğu Lambası Yanmıyor', açıklama: '2. kat merdiven boşluğundaki lamba patlamış, değiştirilmesi gerekiyor.', durum: 'YENİ', is_anonymous: false, kullanıcı_id: 'sakin_id', daire_no: 'A1', oluşturma_tarihi: new Date(Date.now() - 86400000).toISOString(), dosya_adı: null },
-                    { id: 'c2', kategori_id: 4, başlık: 'Anonim Gürültü Şikayeti', açıklama: 'Gece 11’den sonra yüksek sesli müzik dinleniyor, rahatsızlık verici.', durum: 'İŞLENİYOR', is_anonymous: true, kullanıcı_id: null, daire_no: null, oluşturma_tarihi: new Date(Date.now() - 172800000).toISOString(), dosya_adı: null }
+                    // Dosyalı şikayet
+                    { id: 'c1', kategori_id: 2, başlık: 'Merdiven Boşluğu Lambası Yanmıyor', açıklama: '2. kat merdiven boşluğundaki lamba patlamış, değiştirilmesi gerekiyor.', durum: 'YENİ', is_anonymous: false, kullanıcı_id: 'sakin_id', daire_no: 'A1', oluşturma_tarihi: oneDayAgo, dosya_adı: 'kirik_lamba_fotografi.jpg' },
+                    // Anonim şikayet
+                    { id: 'c2', kategori_id: 4, başlık: 'Anonim Gürültü Şikayeti', açıklama: 'Gece 11’den sonra yüksek sesli müzik dinleniyor, rahatsızlık verici.', durum: 'İŞLENİYOR', is_anonymous: true, kullanıcı_id: null, daire_no: null, oluşturma_tarihi: oneWeekAgo, dosya_adı: null },
+                    // Eski şikayet
+                    { id: 'c3', kategori_id: 1, başlık: 'Bina Girişi Temizliği', açıklama: 'Girişteki paspaslar kirlenmiş.', durum: 'ÇÖZÜLDÜ', is_anonymous: false, kullanıcı_id: 'sakin_id', daire_no: 'A1', oluşturma_tarihi: oneMonthAgo, dosya_adı: null }
                 );
                 // Demo not ekle (Senaryo 3'ün Yönetici Cevabı adımı)
                 db.complaintNotes.push(
